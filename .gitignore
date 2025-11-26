@@ -1,0 +1,4 @@
+harpose\0_SMPL_models
+harpose\1_data_pipeline\data
+harpose\1_data_pipeline\processed_data
+harpose\2_imu_based_har\feature_models\data_features
