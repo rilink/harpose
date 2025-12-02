@@ -34,7 +34,7 @@ Returning e.g. for s1/acting1.pkl
 (4113, 6, 3)
 (4113, 72)
 ```
-where there are 4113 frames, 6 selected sensor locations of 3D sensor data for acc, gyr, mag and 72 for SMPL for the 24 joints à 3 parameters per axis-angle.   
+where there are 4113 frames, 6 selected sensor locations of 3D sensor data for acc, gyr, mag and 72 for SMPL for the 24 joints à 3 parameters per axis-angle.     
 The six chosen IMU locations are 
 ```
 TC_six_imus = {9: 'L_LowLeg',
