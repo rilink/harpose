@@ -19,10 +19,11 @@ This repository contains:
 - Some preprocessing
 - Code for LOSO evaluation
 - IMU-based, pose-based, and multimodal fusion models
-- and experiments of those
+- and experiments of those   
+
+Disclaimer: In this experiments we do not use SMPL poses produced by an inertial poser, but use ground-truth poses instead.  
 
 ---
-
 ## Setup Instructions
 
 ### 1. Download Required Models and Data and Python dependencies
