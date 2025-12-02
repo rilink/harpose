@@ -1,13 +1,12 @@
 # Files
-harpose\0_SMPL_models\*
-harpose\1_data_pipeline\data
-harpose\1_data_pipeline\processed_data
-harpose\A_imu_based_har\feature_models\data_features\*
-harpose\A_imu_based_har\feature_models\
-harpose\A_imu_based_har\deep_models\DeepConvLSTM_embeddings\*
-harpose\B_pose_based_har\smpl_models\CNN_embeddings\*
-harpose\C_imu+pose_based_har\midlvl_fusion
-
+0_SMPL_models/*
+1_data_pipeline/data
+1_data_pipeline/processed_data
+A_imu_based_har/feature_models/data_features/*
+A_imu_based_har/feature_models/
+A_imu_based_har/deep_models/DeepConvLSTM_embeddings/*
+B_pose_based_har/smpl_models/CNN_embeddings/*
+C_imu+pose_based_har/midlvl_fusion
 
 # Editors
 .vscode/
