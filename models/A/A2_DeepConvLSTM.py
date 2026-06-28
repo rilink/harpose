@@ -1,12 +1,16 @@
 """
-DeepConvLSTM LOSO training + embedding extraction (LSTM features).
-- Columns containing 'smpl' are ignored throughout.
-- Saves one CSV per fold under DeepConvLSTM_embeddings/ containing logits.
+A2: DeepConvLSTM on gravity-corrected accelerometer + orientation + gyroscope.
+IMU-only: no pose data is used, even though the script reads from the fused
+acc/ori/gyr + pose CSV (data_pipeline/build_windowed_30hz_fused_acc_ori_gyr_pose.py).
+
+InertialDataset auto-selects any column containing 'acc'/'gyr'/'ori'
+(excluding 'smpl'/pose/translation columns), so feeding it the fused CSV
+directly yields the 75-channel IMU-only input (the fused CSV has no
+magnetometer columns).
 """
 
 import os
 import ast
-import glob
 import numpy as np
 import pandas as pd
 from typing import Tuple, Dict, Any
@@ -14,7 +18,7 @@ from typing import Tuple, Dict, Any
 import torch
 from torch import nn, optim
 from torch.utils.data import Dataset, DataLoader, random_split
-from sklearn.metrics import f1_score, accuracy_score
+from sklearn.metrics import f1_score, accuracy_score, confusion_matrix
 
 
 # ---------------------------
@@ -48,7 +52,7 @@ class DeepConvLSTM(nn.Module):
         self.conv2 = nn.Conv2d(conv_kernels, conv_kernels, (conv_kernel_size, 1))
         self.conv3 = nn.Conv2d(conv_kernels, conv_kernels, (conv_kernel_size, 1))
         self.conv4 = nn.Conv2d(conv_kernels, conv_kernels, (conv_kernel_size, 1))
-   
+
         # compute final sequence length after 4 convs
         final_seq_len = window_size - (conv_kernel_size - 1) * 4
         self.final_seq_len = final_seq_len if final_seq_len > 0 else 1
@@ -59,7 +63,6 @@ class DeepConvLSTM(nn.Module):
         self.dropout = nn.Dropout(dropout)
         self.classifier = nn.Linear(lstm_units, classes)
         self.activation = nn.ReLU()
-
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -75,7 +78,6 @@ class DeepConvLSTM(nn.Module):
         if self.feature_extract == 'conv':
             return x.view(x.shape[0], -1)
 
-
         x = x.permute(0, 2, 1, 3)  # (batch, seq_len', conv_kernels, channels)
         x = x.reshape(x.shape[0], x.shape[1], -1)  # (batch, seq_len', conv_kernels*channels)
 
@@ -84,7 +86,6 @@ class DeepConvLSTM(nn.Module):
         out = self.dropout(last)
         logits = self.classifier(out)
         return logits
-    
 
     def get_lstm_features(self, x):
         """
@@ -100,7 +101,8 @@ class DeepConvLSTM(nn.Module):
         x = x.permute(0, 2, 1, 3)
         x = x.reshape(x.shape[0], x.shape[1], -1)
         lstm_out, _ = self.lstm(x)
-        return lstm_out[:, -1, :].detach() 
+        return lstm_out[:, -1, :].detach()
+
 
 # ---------------------------
 # Dataset
@@ -111,7 +113,7 @@ class InertialDataset(Dataset):
     Columns containing 'smpl' are ignored.
     """
     def __init__(self, df: pd.DataFrame):
-        feature_cols = [c for c in df.columns if any(sensor in c for sensor in ['acc', 'gyr', 'mag']) and ('smpl' not in c)]
+        feature_cols = [c for c in df.columns if any(sensor in c for sensor in ['acc', 'gyr', 'ori']) and ('smpl' not in c)]
         self.meta = df.reset_index(drop=True)
         self.feature_cols = feature_cols
 
@@ -145,6 +147,7 @@ class InertialDataset(Dataset):
         y = self.labels[idx]
         return torch.tensor(x, dtype=torch.float32), torch.tensor(y, dtype=torch.long), int(idx)
 
+
 # ---------------------------
 # LOSO generator
 # ---------------------------
@@ -159,9 +162,31 @@ def LOSO(data_path: str):
         test_df = df[df["subject"] == test_subj].reset_index(drop=True)
         yield test_subj, {'train': train_df, 'test': test_df}
 
+
 # ---------------------------
 # Utilities
 # ---------------------------
+def pooled_metrics(y_true, y_pred) -> Dict[str, Any]:
+    """
+    Pool predictions across all LOSO folds and compute accuracy, macro-F1,
+    weighted-F1 and a confusion matrix over the combined set.
+
+    Avoids the instability of per-fold macro-F1 when a test subject is
+    missing one or more classes (small per-fold class counts mean a single
+    misclassification can swing macro-F1 a lot).
+    """
+    y_true = np.asarray(y_true)
+    y_pred = np.asarray(y_pred)
+    labels = sorted(set(y_true.tolist()) | set(y_pred.tolist()))
+    return {
+        'accuracy': accuracy_score(y_true, y_pred),
+        'macro_f1': f1_score(y_true, y_pred, average='macro', labels=labels, zero_division=0),
+        'weighted_f1': f1_score(y_true, y_pred, average='weighted', labels=labels, zero_division=0),
+        'confusion_matrix': confusion_matrix(y_true, y_pred, labels=labels),
+        'labels': labels,
+    }
+
+
 def compute_mean_std_from_dataset(dataset: InertialDataset) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Compute per-channel mean and std across the dataset features (over samples and time).
@@ -172,8 +197,9 @@ def compute_mean_std_from_dataset(dataset: InertialDataset) -> Tuple[torch.Tenso
     std[std == 0.0] = 1.0
     return torch.tensor(mean).view(1, 1, -1), torch.tensor(std).view(1, 1, -1)
 
+
 # ---------------------------
-# Training (separate function)
+# Training
 # ---------------------------
 def train_model(
     train_dataset: InertialDataset,
@@ -230,8 +256,7 @@ def train_model(
         train_loss = 0.0
         for X, y, _ in train_loader:
             X = X.to(device).float()
-            X = (X - mean) / (std + 1e-8)  
-            X = torch.tensor(X, dtype=torch.float32).to(device)
+            X = (X - mean) / (std + 1e-8)
             y = y.to(device)
             optimizer.zero_grad()
             logits = model(X)
@@ -248,8 +273,7 @@ def train_model(
         with torch.no_grad():
             for X, y, _ in val_loader:
                 X = X.to(device).float()
-                X = (X - mean) / (std + 1e-8) 
-                X = torch.tensor(X, dtype=torch.float32).to(device)
+                X = (X - mean) / (std + 1e-8)
                 y = y.to(device)
                 logits = model(X)
                 preds = torch.argmax(logits, dim=1)
@@ -277,55 +301,58 @@ def train_model(
     }
     return model, metrics
 
+
 # ---------------------------
-# Embedding extraction (separate function)
+# Embedding extraction
 # ---------------------------
-def extract_embeddings(model, data_loader, device, mean, std, level='lstm',):
+def extract_embeddings(model, data_loader, device, mean, std, level='lstm'):
     model.eval()
     model.feature_extract = level
 
     embeddings, y_true, y_pred_emb, y_pred_dcl, indices = [], [], [], [], []
+    logits_dcl_all, logits_emb_all = [], []
 
     with torch.no_grad():
         for X, y, idx in data_loader:
             X = X.to(device).float()
-            X = (X - mean) / (std)
-            print('X')
-            print(X.shape)
+            X = (X - mean) / std
             logits_dcl = model(X)
             preds_dcl = torch.argmax(logits_dcl, dim=1)
             z = model.get_lstm_features(X)
             embeddings.append(z.cpu().numpy())
-            
+
             logits_emb = model.classifier(model.dropout(z.to(device)))
             preds_emb = torch.argmax(logits_emb, dim=1)
 
             y_true.append(y.numpy())
             y_pred_emb.append(preds_emb.cpu().numpy())
             y_pred_dcl.append(preds_dcl.cpu().numpy())
+            logits_dcl_all.append(logits_dcl.cpu().numpy())
+            logits_emb_all.append(logits_emb.cpu().numpy())
             indices.append(idx.numpy())
 
-    print('embeddings')
-    print(embeddings)
-            
     model.feature_extract = None
     return (
         np.concatenate(embeddings),
         np.concatenate(y_true),
         np.concatenate(y_pred_emb),
         np.concatenate(y_pred_dcl),
-        np.concatenate(indices)
+        np.concatenate(indices),
+        np.concatenate(logits_dcl_all),
+        np.concatenate(logits_emb_all),
     )
+
 
 # ---------------------------
 # Orchestration per fold
 # ---------------------------
-def run_loso_and_save_embeddings(data_path: str, output_folder: str, device: torch.device):
+def run_loso_and_save_embeddings(data_path: str, output_folder: str, device: torch.device, epochs: int = 10):
     """
     Run LOSO training + embedding extraction, and save combined embeddings per fold under output_folder.
     """
     os.makedirs(output_folder, exist_ok=True)
     fold_metrics = {}
+    pooled = {'dcl': {'y_true': [], 'y_pred': []}, 'emb': {'y_true': [], 'y_pred': []}}
     for test_subj, split in LOSO(data_path):
         print('LOSO Test subject:', test_subj)
         train_df = split['train'].reset_index(drop=True)
@@ -340,7 +367,7 @@ def run_loso_and_save_embeddings(data_path: str, output_folder: str, device: tor
             window_size=train_dataset_full.window_size,
             channels=train_dataset_full.channels,
             classes=train_dataset_full.classes,
-            epochs=10,
+            epochs=epochs,
             batch_size=32,
             lr=1e-3,
             val_fraction=0.1,
@@ -353,11 +380,16 @@ def run_loso_and_save_embeddings(data_path: str, output_folder: str, device: tor
         train_loader_for_embeddings = DataLoader(train_dataset_full, batch_size=64, shuffle=False)
         test_loader_for_embeddings = DataLoader(test_dataset, batch_size=64, shuffle=False)
 
-        emb_train, y_true_train, y_pred_emb_train, y_pred_dcl_train, idx_train = extract_embeddings(model, train_loader_for_embeddings, device, mean=mean, std=std, level='lstm') 
-        emb_test, y_true_test, y_pred_emb_test, y_pred_dcl_test, idx_test = extract_embeddings(model, test_loader_for_embeddings, device, mean=mean, std=std, level='lstm') 
+        emb_train, y_true_train, y_pred_emb_train, y_pred_dcl_train, idx_train, logits_dcl_train, logits_emb_train = extract_embeddings(model, train_loader_for_embeddings, device, mean=mean, std=std, level='lstm')
+        emb_test, y_true_test, y_pred_emb_test, y_pred_dcl_test, idx_test, logits_dcl_test, logits_emb_test = extract_embeddings(model, test_loader_for_embeddings, device, mean=mean, std=std, level='lstm')
 
         emb_test_accuracy = accuracy_score(y_true_test, y_pred_emb_test)
         emb_test_macro_f1 = f1_score(y_true_test, y_pred_emb_test, average='macro')
+
+        pooled['dcl']['y_true'].extend(y_true_test)
+        pooled['dcl']['y_pred'].extend(y_pred_dcl_test)
+        pooled['emb']['y_true'].extend(y_true_test)
+        pooled['emb']['y_pred'].extend(y_pred_emb_test)
 
         dcl_test_accuracy = accuracy_score(y_true_test, y_pred_dcl_test)
         dcl_test_macro_f1 = f1_score(y_true_test, y_pred_dcl_test, average='macro')
@@ -379,12 +411,18 @@ def run_loso_and_save_embeddings(data_path: str, output_folder: str, device: tor
         emb_train_df['y_pred_dcl'] = y_pred_dcl_train
         emb_train_df['idx'] = idx_train
         emb_train_df['split'] = 'train'
+        for c in range(logits_dcl_train.shape[1]):
+            emb_train_df[f'logits_dcl_{c}'] = logits_dcl_train[:, c]
+            emb_train_df[f'logits_emb_{c}'] = logits_emb_train[:, c]
 
         emb_test_df['y_true'] = y_true_test
         emb_test_df['y_pred_emb'] = y_pred_emb_test
         emb_test_df['y_pred_dcl'] = y_pred_dcl_test
         emb_test_df['idx'] = idx_test
         emb_test_df['split'] = 'test'
+        for c in range(logits_dcl_test.shape[1]):
+            emb_test_df[f'logits_dcl_{c}'] = logits_dcl_test[:, c]
+            emb_test_df[f'logits_emb_{c}'] = logits_emb_test[:, c]
 
         meta_train = train_df.reset_index().loc[idx_train, ['subject', 'activity', 'file_path', 'window_idx']].reset_index(drop=True)
         meta_test = test_df.reset_index().loc[idx_test, ['subject', 'activity', 'file_path', 'window_idx']].reset_index(drop=True)
@@ -405,7 +443,8 @@ def run_loso_and_save_embeddings(data_path: str, output_folder: str, device: tor
             'dcl_test_macro_f1': metrics['dcl_test_macro_f1']
         }
 
-    return fold_metrics
+    return fold_metrics, pooled
+
 
 # ---------------------------
 # Seed
@@ -422,30 +461,28 @@ def set_seed(seed: int = 42) -> None:
 
 
 # ---------------------------
-# Main
+# Entry point
 # ---------------------------
+DATA_PATH = os.path.normpath(os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "../../data_pipeline/results_30hz_fused_acc_ori_gyr_pose/"
+    "windowed_30hz_fused_acc_ori_gyr_pose_lw_rw_lp_rp_h.csv"))
+OUTPUT_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "A2_DeepConvLSTM_embeddings")
+EPOCHS = 20
+
 if __name__ == "__main__":
     set_seed(42)
-    DATA_PATH = "../../1_data_pipeline/processed_data/windowed_smpl_imu.csv"
-    OUTPUT_FOLDER = "DeepConvLSTM_embeddings"
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Device: {device}")
 
-    fold_metrics = run_loso_and_save_embeddings(DATA_PATH, OUTPUT_FOLDER, device)
-    print("Fold metrics:", fold_metrics)
+    fold_metrics, pooled = run_loso_and_save_embeddings(DATA_PATH, OUTPUT_FOLDER, device, epochs=EPOCHS)
 
-    # Convert dict → arrays
-    emb_acc      = np.array([v['emb_test_accuracy']  for v in fold_metrics.values()])
-    emb_f1       = np.array([v['emb_test_macro_f1']  for v in fold_metrics.values()])
-    dcl_acc      = np.array([v['dcl_test_accuracy']  for v in fold_metrics.values()])
-    dcl_f1       = np.array([v['dcl_test_macro_f1']  for v in fold_metrics.values()])
+    dcl_acc = np.array([v["dcl_test_accuracy"] for v in fold_metrics.values()])
+    dcl_f1 = np.array([v["dcl_test_macro_f1"] for v in fold_metrics.values()])
+    pm = pooled_metrics(pooled["dcl"]["y_true"], pooled["dcl"]["y_pred"])
 
     print("\n================ LOSO SUMMARY ================")
-
-    print(f"Embedding Test Accuracy:   {emb_acc.mean():.3f} ± {emb_acc.std():.3f}")
-    print(f"Embedding Test Macro-F1:   {emb_f1.mean():.3f} ± {emb_f1.std():.3f}")
-
-    print(f"DCL Test Accuracy:         {dcl_acc.mean():.3f} ± {dcl_acc.std():.3f}")
-    print(f"DCL Test Macro-F1:         {dcl_f1.mean():.3f} ± {dcl_f1.std():.3f}")
-
-    print("=============================================\n")
-
+    print(f"DCL Test Accuracy:  {dcl_acc.mean():.3f} ± {dcl_acc.std():.3f}")
+    print(f"DCL Test Macro-F1:  {dcl_f1.mean():.3f} ± {dcl_f1.std():.3f}")
+    print(f"Pooled accuracy={pm['accuracy']:.3f}  macro_f1={pm['macro_f1']:.3f}")
+    print("================================================\n")

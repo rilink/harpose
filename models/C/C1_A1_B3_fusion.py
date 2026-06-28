@@ -1,0 +1,104 @@
+"""
+C1 (A1+B3) — Confidence-threshold fusion of A1 (LightGBM) and B3 (TCN-FK).
+Tau selection: per-fold on pooled test data from all OTHER folds.
+"""
+
+import os
+import numpy as np
+import pandas as pd
+from scipy.special import softmax
+from sklearn.metrics import f1_score, accuracy_score
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+A1_DIR = os.path.normpath(os.path.join(SCRIPT_DIR, "../A/A1_LightGBM_embeddings"))
+
+POSE_DIRS = {
+    "GT":   os.path.normpath(os.path.join(
+        SCRIPT_DIR,
+        "../B/B3_TCN_FK_gt_embeddings")),
+    "PRED": os.path.normpath(os.path.join(
+        SCRIPT_DIR,
+        "../B/B3_TCN_FK_pred_embeddings")),
+}
+
+NUM_CLASSES = 4
+TAU_VALUES  = [0.40, 0.45, 0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90]
+SUBJECTS    = [1, 2, 3, 4, 5]
+
+IMU_LOGIT_COLS  = [f"logits_lgbm_{i}" for i in range(NUM_CLASSES)]
+POSE_LOGIT_COLS = [f"logits_tcn_{i}"  for i in range(NUM_CLASSES)]
+MERGE_KEYS      = ["subject", "file_base", "window_idx"]
+
+
+def _add_file_base(df):
+    df = df.copy()
+    df["file_base"] = df["file_path"].apply(lambda x: os.path.basename(str(x)))
+    return df
+
+
+def load_fold(subj, pose_dir):
+    imu  = _add_file_base(pd.read_csv(os.path.join(A1_DIR,    f"fold_{subj}.csv")))
+    pose = _add_file_base(pd.read_csv(os.path.join(pose_dir,  f"fold_{subj}.csv")))
+
+    imu_sub  = imu[MERGE_KEYS + ["split", "y_true"] + IMU_LOGIT_COLS]
+    pose_sub = pose[MERGE_KEYS + POSE_LOGIT_COLS].rename(
+        columns={f"logits_tcn_{i}": f"logits_pose_{i}" for i in range(NUM_CLASSES)})
+
+    return pd.merge(imu_sub, pose_sub, on=MERGE_KEYS, how="inner")
+
+
+def threshold_fusion(p_imu, p_pose, tau):
+    use_imu = (p_pose.max(axis=1) < tau) & (p_imu.max(axis=1) > p_pose.max(axis=1))
+    return np.where(use_imu[:, None], p_imu, p_pose).argmax(axis=1)
+
+
+def get_probs(df):
+    p_imu  = softmax(df[IMU_LOGIT_COLS].values.astype(np.float32), axis=1)
+    p_pose = softmax(df[[f"logits_pose_{i}" for i in range(NUM_CLASSES)]].values.astype(np.float32), axis=1)
+    y      = df["y_true"].values.astype(int)
+    return p_imu, p_pose, y
+
+
+def best_tau_on_pool(folds_data, exclude_subj):
+    rows = [d for s, d in folds_data.items() if s != exclude_subj]
+    df   = pd.concat(rows, ignore_index=True)
+    test = df[df["split"] == "test"]
+    p_imu, p_pose, y = get_probs(test)
+    best_f1, best_tau = -1, TAU_VALUES[0]
+    for tau in TAU_VALUES:
+        f1 = f1_score(y, threshold_fusion(p_imu, p_pose, tau),
+                      average="macro", zero_division=0)
+        if f1 > best_f1:
+            best_f1, best_tau = f1, tau
+    return best_tau
+
+
+if __name__ == "__main__":
+    print("=" * 62)
+    print("  C1 (A1+B3) — Threshold fusion (LightGBM + TCN-FK)")
+    print("  tau: per-fold on other-folds test data")
+    print("=" * 62)
+
+    for label, pose_dir in POSE_DIRS.items():
+        folds_data = {s: load_fold(s, pose_dir) for s in SUBJECTS}
+
+        f1s, accs, taus = [], [], []
+        for test_subj in SUBJECTS:
+            tau = best_tau_on_pool(folds_data, exclude_subj=test_subj)
+            taus.append(tau)
+
+            test_df = folds_data[test_subj][folds_data[test_subj]["split"] == "test"]
+            p_imu, p_pose, y = get_probs(test_df)
+
+            yp  = threshold_fusion(p_imu, p_pose, tau)
+            f1  = f1_score(y, yp, average="macro", zero_division=0)
+            acc = accuracy_score(y, yp)
+            f1s.append(f1); accs.append(acc)
+            print(f"  [{label}] subj {test_subj}  tau={tau:.2f}  macro-f1={f1:.3f}  acc={acc:.3f}")
+
+        print(f"\n  [{label}] per-fold taus: {taus}")
+        print(f"  [{label}] macro-f1 = {np.mean(f1s):.3f} +/- {np.std(f1s):.3f}")
+        print(f"  [{label}] accuracy = {np.mean(accs):.3f} +/- {np.std(accs):.3f}\n")
+
+    print("Done.")
