@@ -1,12 +1,8 @@
 """
-A2: DeepConvLSTM on gravity-corrected accelerometer + orientation + gyroscope.
-IMU-only: no pose data is used, even though the script reads from the fused
-acc/ori/gyr + pose CSV (data_pipeline/build_windowed_30hz_fused_acc_ori_gyr_pose.py).
-
-InertialDataset auto-selects any column containing 'acc'/'gyr'/'ori'
-(excluding 'smpl'/pose/translation columns), so feeding it the fused CSV
-directly yields the 75-channel IMU-only input (the fused CSV has no
-magnetometer columns).
+A2: DeepConvLSTM on IMU signals.
+Input: acc (15) + ori (45) + gyr (15) = 75 channels, 50-frame windows at 30 Hz.
+Architecture: 4× Conv2D(64, k=(5,1)) → LSTM(128) → Linear(128, 4).
+Training: 30 epochs, Adam lr=1e-3, class-weighted CE.
 """
 
 import os

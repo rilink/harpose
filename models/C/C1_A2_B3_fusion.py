@@ -1,11 +1,6 @@
 """
-C1 (A2+B3) — Confidence-threshold fusion of A2 (DeepConvLSTM, g-acc+ori+gyr,
-75ch) and B3 (TCN-FK).
-
-Identical methodology to C1_A1_B3_fusion.py, with A2 instead of A1 as the
-IMU branch.
-
-Tau selection: per-fold on pooled test data from all OTHER folds.
+C1 (A2+B3): Confidence-threshold fusion of DeepConvLSTM (A2) and TCN-FK (B3).
+Threshold τ selected per fold on pooled test data from all other folds.
 """
 
 import os

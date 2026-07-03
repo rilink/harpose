@@ -1,28 +1,9 @@
 """
-B1: CNN on SMPL pose parameters (PoseCNN).
-
-Architecture/training: Conv2d 3->32->64->128, BatchNorm+ReLU+MaxPool+Dropout2d
-blocks, AdaptiveAvgPool2d, Adam lr=1e-3, ReduceLROnPlateau on val macro-F1,
-10 epochs, class-weighted CrossEntropyLoss, 10% random val split.
-
-Reads only the poseT_*/poseP_* columns of the fused acc/ori/gyr+pose CSV
-(acc/ori/gyr columns are ignored); 30Hz, 50-frame windows, 24x3x3
-rotation-matrix poseT_*/poseP_* taken directly from the MobilePoser .pt
-files. poseT_*/poseP_* rotation matrices are converted to
-axis-angle (after root-joint frame correction) for the CNN input
-representation (3, 24, T). Runs LOSO TWICE: once on ground-truth pose
-(poseT_*) and once on MobilePoser-predicted pose (poseP_*), reporting both
-sets of results separately and side by side.
-
-Root-joint frame correction
-----------------------------
-poseT_*/poseP_* joint 0 (pelvis/root) is stored in MobilePoser's native Y-up
-(Xsens/DIP) frame, while joints 1-23 use AMASS's Z-up frame (verified
-empirically: joints 1-23 match smpl_* to float32 precision; joint 0 differs
-by R_x(-90 deg)). Before converting to axis-angle, R_x(+90 deg) is applied
-to joint 0's rotation matrix to bring the whole skeleton back into AMASS
-frame - the same correction applied to the root joint/translation in
-`models/B/B4_STGCN.py`.
+B1: CNN on SMPL axis-angle pose (PoseCNN).
+Input: (3, 24, 50) — axis-angle pose, 24 joints, 50 frames at 30 Hz.
+Architecture: Conv2D(3→32→64→128, k=3) + BN + ReLU + MaxPool → AdaptiveAvgPool → Linear(128, 4).
+Training: 10 epochs, Adam lr=1e-3, ReduceLROnPlateau, class-weighted CE.
+Runs LOSO twice: GT (poseT_*) and PRED (poseP_*).
 """
 
 import os

@@ -1,11 +1,7 @@
 """
-A1: LightGBM on handcrafted IMU features. Saves per-fold logit CSVs to
-A1_LightGBM_embeddings/ for use in fusion experiments.
-Channels: acc (15) + ori (45) + gyr (15) = 75 ch.
-
-Output columns per fold: subject, activity, file_path, window_idx,
-                         y_true (0-indexed), y_pred_lgbm, idx, split,
-                         logits_lgbm_0..3
+A1: LightGBM on handcrafted IMU features.
+Input: acc (15) + ori (45) + gyr (15) = 75 channels, 50-frame windows at 30 Hz.
+Features: statistical + frequency-domain descriptors per channel.
 """
 
 import os

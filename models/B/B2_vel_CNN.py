@@ -1,19 +1,9 @@
 """
-B2: PoseCNN with velocity stream.
-
-Identical to B1 (PoseCNN) but concatenates frame-to-frame angular velocity
-as an additional 3-channel stream, giving a 6-channel input instead of
-3-channel:
-  channel 0-2: axis-angle pose   (same as B1)
-  channel 3-5: axis-angle velocity (np.diff padded at t=0)
-
-Architecture: same PoseCNN blocks as B1 but Conv2d(6 → 32 → 64 → 128, ...)
-Output embedding: 128-dim from AdaptiveAvgPool2d, same as B1.
-Training: same 10-epoch Adam + ReduceLROnPlateau schedule as B1.
-
-Data: only the poseT_*/poseP_* columns of the fused acc/ori/gyr+pose CSV are
-  used (30Hz, 50-frame windows); acc/ori/gyr columns are ignored.
-Run TWICE: GT pose (poseT_*) and PRED pose (poseP_*), dual reporting.
+B2: CNN on SMPL axis-angle pose + velocity (PoseCNNVel).
+Input: (6, 24, 50) — axis-angle pose (3 ch) + frame-to-frame velocity (3 ch), 24 joints, 50 frames at 30 Hz.
+Architecture: Conv2D(6→32→64→128, k=3) + BN + ReLU + MaxPool → AdaptiveAvgPool → Linear(128, 4).
+Training: 10 epochs, Adam lr=1e-3, ReduceLROnPlateau, class-weighted CE.
+Runs LOSO twice: GT (poseT_*) and PRED (poseP_*).
 """
 
 import os

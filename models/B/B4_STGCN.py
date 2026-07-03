@@ -1,16 +1,9 @@
 """
 B4: ST-GCN on FK joint positions + velocity.
-
-Forward kinematics -> root-relative 3D joint positions, then frame-to-frame
-velocity, giving a 6-channel (position + velocity) feature per joint. Graph
-convolution over the SMPL kinematic tree (SMPL_EDGES adjacency), 6->24->32->32
-channels, dropout=0.6, AdamW lr=3e-4 weight_decay=1e-3, CosineAnnealingLR,
-25 epochs.
-
-Reads only the poseT_*/poseP_* columns of the fused acc/ori/gyr+pose CSV
-(acc/ori/gyr columns are ignored). Runs LOSO TWICE: once on ground-truth
-pose (poseT_*) and once on MobilePoser-predicted pose (poseP_*), reporting
-both sets of results separately and side by side.
+Input: (6, 24, 50) — position (3 ch) + velocity (3 ch) per joint, 24 joints, 50 frames at 30 Hz.
+Architecture: GraphConv(6→24→32→32) over SMPL kinematic tree → GlobalAvgPool → Linear(32, 4).
+Training: 25 epochs, AdamW lr=3e-4, CosineAnnealingLR, dropout=0.6, class-weighted CE.
+Runs LOSO twice: GT (poseT_*) and PRED (poseP_*).
 """
 
 import os

@@ -1,6 +1,6 @@
 """
-C1 (A1+B3) — Confidence-threshold fusion of A1 (LightGBM) and B3 (TCN-FK).
-Tau selection: per-fold on pooled test data from all OTHER folds.
+C1 (A1+B3): Confidence-threshold fusion of LightGBM (A1) and TCN-FK (B3).
+Threshold τ selected per fold on pooled test data from all other folds.
 """
 
 import os

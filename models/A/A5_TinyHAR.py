@@ -1,15 +1,8 @@
 """
-A5: TinyHAR for IMU-based HAR.
-
-Architecture (from Yexu Zhou et al.):
-  4× Conv2D channel-wise feature extraction (B,1,T,C) → (B,F,T',C)
-  Cross-channel interaction: SelfAttention per timestep
-  Cross-channel fusion: FC (flatten + linear) → (B,T',2F)
-  Temporal interaction: GRU → (B,T',2F)
-  Temporal fusion: FC (flatten + linear) → (B,2F)
-  Prediction: Linear(2F, num_classes)
-
-  filter_num=64 → embedding_dim=128 (2*filter_num)
+A5: TinyHAR on IMU signals.
+Input: acc (15) + ori (45) + gyr (15) = 75 channels, 50-frame windows at 30 Hz.
+Architecture: 4× Conv2D(64) channel-wise → SelfAttention → CrossChannelFC
+  → GRU → TemporalFC → Linear(128, 4).
 """
 
 import ast

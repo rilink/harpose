@@ -1,12 +1,8 @@
 """
-A3: CNN-HAR for IMU-based HAR.
-
-PyTorch port of CNNHAR (MatConvNet/fcnn.m):
-  Conv2D(1→50, 5×1) → ReLU → MaxPool(4×1,s=2×1) → LRN
-  Conv2D(50→40, 5×1) → ReLU → MaxPool(4×1,s=2×1) → LRN
-  Conv2D(40→20, 3×1) → ReLU → LRN
-  Conv2D(20→400, 1×num_sensors) → ReLU → LRN   [fuses sensor channels]
-  AdaptiveMaxPool → 400-dim embedding → Conv2D(400→num_classes,1×1)
+A3: CNN-HAR on IMU signals.
+Input: acc (15) + ori (45) + gyr (15) = 75 channels, 50-frame windows at 30 Hz.
+Architecture: Conv2D(1→50, 5×1) → Conv2D(50→40, 5×1) → Conv2D(40→20, 3×1)
+  → Conv2D(20→400, 1×num_sensors) → AdaptiveMaxPool → Linear(400, 4).
 """
 
 import ast

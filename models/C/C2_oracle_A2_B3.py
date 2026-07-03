@@ -1,6 +1,6 @@
 """
-C2 oracle — A2 (DeepConvLSTM, g-acc+ori+gyr) + B3 (TCN-FK).
-Picks whichever model is correct; if both right/wrong, prefer pose (B3).
+C2 oracle (A2+B3): Upper bound combining DeepConvLSTM (A2) and TCN-FK (B3).
+Picks the correct branch; if both wrong or both right, prefers pose (B3).
 """
 
 import os

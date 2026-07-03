@@ -1,24 +1,9 @@
 """
-B3: Temporal CNN on FK joint positions + velocity (TCN-FK).
-
-Forward kinematics → root-relative 3D positions (24 joints × 3 = 72 channels per
-frame) + frame-to-frame velocity (another 72) → 144-channel, 50-frame input to a
-lightweight dilated 1D-TCN.
-
-Architecture:
-  Input:                  (N, 144, 50)
-  ResBlock(144→128, d=1)  receptive field:  3 frames
-  ResBlock(128→128, d=2)  receptive field:  7 frames
-  ResBlock(128→128, d=4)  receptive field: 15 frames
-  ResBlock(128→128, d=8)  receptive field: 31 frames
-  GlobalAvgPool → (N, 128)   ← embedding
-  Dropout(0.5) → Linear(128, 4)
-
-Training: 30 epochs, AdamW lr=3e-4, weight_decay=1e-4,
-  CosineAnnealingLR, best-val-macro-F1 checkpoint, class-weighted CE.
-Data: only the poseT_*/poseP_* columns of the fused acc/ori/gyr+pose CSV are
-  used (30Hz, 50-frame windows); acc/ori/gyr columns are ignored.
-Run TWICE: GT (poseT_*) and PRED (poseP_*), dual reporting.
+B3: Dilated TCN on FK joint positions + velocity (TCN-FK).
+Input: (144, 50) — root-relative 3D positions (72 ch) + velocity (72 ch), 50 frames at 30 Hz.
+Architecture: 4× ResBlock(128, d=1,2,4,8) → GlobalAvgPool → Linear(128, 4).
+Training: 30 epochs, AdamW lr=3e-4, CosineAnnealingLR, class-weighted CE.
+Runs LOSO twice: GT (poseT_*) and PRED (poseP_*).
 """
 
 import os

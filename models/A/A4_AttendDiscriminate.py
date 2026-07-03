@@ -1,16 +1,8 @@
 """
-A4: Attend-and-Discriminate for IMU-based HAR.
-
-Architecture:
-  Input: (B, T, C)
-  4× Conv2D(filter_num, (filter_size,1)) + ReLU   [(B,1,T,C) internally]
-  SelfAttention per timestep across (filter_num × C) features
-  GRU(filter_num*C → hidden_dim, enc_num_layers=2)
-  TemporalAttention (softmax-weighted sum over time) → (B, hidden_dim)
-  Dropout → Linear(hidden_dim, num_classes)
-
-  Default: filter_num=64, hidden_dim=128, filter_size=5
-  Embedding: 128-dim TemporalAttention output (pre-dropout)
+A4: Attend-and-Discriminate on IMU signals.
+Input: acc (15) + ori (45) + gyr (15) = 75 channels, 50-frame windows at 30 Hz.
+Architecture: 4× Conv2D(64, 5×1) → SelfAttention → GRU(128, 2 layers)
+  → TemporalAttention → Linear(128, 4).
 """
 
 import ast
